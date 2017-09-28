@@ -35,7 +35,6 @@ using namespace std;
 uint32_t ev2=0;
 uint32_t ntracks2 =0;
 
-ofstream myfile2;
 
 ShallowTrackClustersProducerCombined::ShallowTrackClustersProducerCombined(const edm::ParameterSet& iConfig)
   :  tracks_token_(consumes<edm::View<reco::Track> >(iConfig.getParameter<edm::InputTag>("Tracks"))),
@@ -46,8 +45,8 @@ ShallowTrackClustersProducerCombined::ShallowTrackClustersProducerCombined(const
      Suffix       ( iConfig.getParameter<std::string>("Suffix")    ),
      Prefix       ( iConfig.getParameter<std::string>("Prefix") ),
      //lorentzAngleName(iConfig.getParameter<std::string>("LorentzAngle")),
-     isData       ( iConfig.getParameter<bool>("isData") ),
-     edmstripdigisimlink_Token_( consumes<edm::DetSetVector<StripDigiSimLink>>( iConfig.getParameter<edm::InputTag>("StripDigiSimLinkTag")))
+     edmstripdigisimlink_Token_( consumes<edm::DetSetVector<StripDigiSimLink>>( iConfig.getParameter<edm::InputTag>("StripDigiSimLinkTag"))),
+     isData       ( iConfig.getParameter<bool>("isData") )
      //lowBound       ( iConfig.getParameter<int32_t>("lowBound") ),
      //highBound       ( iConfig.getParameter<int32_t>("highBound") ),
      //filename       ( iConfig.getParameter<std::string>("filename") )
@@ -159,7 +158,11 @@ ShallowTrackClustersProducerCombined::ShallowTrackClustersProducerCombined(const
   produces <std::vector<float> >         ( Prefix + "stripChargesensorThickness"        );
   produces <std::vector<float> >         ( Prefix + "stripChargeBdotY"        );
   produces <std::vector<float> >        ( "PU"       );
-  produces <std::vector<unsigned int> > ( "bx"       );
+  produces <std::vector<unsigned int> > ( "bx" );
+
+  //  produces <std::vector<unsigned int> > ( "channel"       );
+  //   produces <std::vector<float> > ( "fraction"       );
+  //  produces <std::vector<int> > ( "bunchcrossing"       );
 
 
   //
@@ -282,7 +285,11 @@ produce(edm::Event& iEvent, const edm::EventSetup& iSetup) {
 
 
   auto       PU      = std::make_unique<std::vector<float>>();
-  auto bx            = std::make_unique<std::vector<unsigned int>>();
+  auto       bx      = std::make_unique<std::vector<unsigned int>>();
+
+  // auto       channel      = std::make_unique<std::vector<unsigned int>>();
+  //auto       fraction     = std::make_unique<std::vector<float>>();
+  //auto       bunchcrossing      = std::make_unique<std::vector<int>>();
 
   edm::ESHandle<TrackerGeometry> theTrackerGeometry;         iSetup.get<TrackerDigiGeometryRecord>().get( theTrackerGeometry );  
   edm::ESHandle<MagneticField> magfield;     iSetup.get<IdealMagneticFieldRecord>().get(magfield);
@@ -500,7 +507,7 @@ produce(edm::Event& iEvent, const edm::EventSetup& iSetup) {
     onTrkClustersBegin->at(trk_idx) = trk_strt_idx;
     onTrkClustersEnd->at(trk_idx)   = ontrk_cluster_idx;
 
-
+    /*
   //inserted digisimlink
     edm::Handle<edmNew::DetSetVector<SiStripCluster>> clustercoll;
     iEvent.getByToken(clusters_token_,clustercoll);
@@ -526,31 +533,34 @@ produce(edm::Event& iEvent, const edm::EventSetup& iSetup) {
 	  int clus_size = clus->amplitudes().size();
 	  int clus_firststrip  = clus->firstStrip();     
 	  int clus_laststrip   = clus_firststrip + clus_size;
-	
-	  
+		  
 	  for(edm::DetSet<StripDigiSimLink>::const_iterator simlinkiter = stripdigilink_detset.data.begin(), 
 		simlinkerEnd = stripdigilink_detset.data.end(); simlinkiter != simlinkerEnd; ++simlinkiter){      
-	    int channel = (int)(simlinkiter->channel()); 
+	    int channel_ = (int)(simlinkiter->channel()); 
+
+	    //	    channel->push_back(channel_);
+	    fraction->push_back(simlinkiter->fraction());
 	    unsigned int clus_bunchcrossing;
-	    if( channel >= clus_firststrip  && channel < clus_laststrip ){
+	    if( channel_ >= clus_firststrip  && channel_ < clus_laststrip ){
 	      clus_bunchcrossing=simlinkiter->eventId().bunchCrossing();
+
 	    }else{
 	      clus_bunchcrossing = -1;
 	    }
-	    //	  }//Loope over edmstripsimdigilink detset
-	 
+
+	      bunchcrossing->push_back(clus_bunchcrossing);	 
 	    if(clus_bunchcrossing==0){
 	      map_subdets_cluster_charge_IT.push_back(clus->charge());
 	      map_subdets_cluster_width_IT.push_back(clus->amplitudes().size());
 	    }else{
 	      map_subdets_cluster_charge_OOT.push_back(clus->charge()); 
 	      map_subdets_cluster_width_OOT.push_back(clus->amplitudes().size()); 
-	    }//*/
+	    }
 	  }//Loop over clusters in each sub-setector
 	}//Loop over edmstripsimdigilink detsetvector
       }//Loop over cluster collection over all SiStrip Clusters
     } //end digisimlink
-
+    */
 
   } //for(TrajTrackAssociationCollection::const_iterator association = associations->begin();
 
@@ -660,6 +670,10 @@ produce(edm::Event& iEvent, const edm::EventSetup& iSetup) {
   
   iEvent.put(std::move(PU),       "PU"        );
   iEvent.put(std::move(bx),       "bx"        );
+  //  iEvent.put(std::move(channel),       "channel"        );
+  //  iEvent.put(std::move(fraction),       "fraction"        );
+  // iEvent.put(std::move(bunchcrossing),       "bunchcrossing"        );
+
   
 }
 
@@ -669,7 +683,6 @@ produce(edm::Event& iEvent, const edm::EventSetup& iSetup) {
 	       if (trk->p()  < 2.0) return false;
 	       if (trk->hitPattern().numberOfValidTrackerHits()  <= 6) return false;
 	       if (trk->normalizedChi2() > 10.0) return false;
-	       //check PV compatibility ??
 	       return true;
 	     }
 
