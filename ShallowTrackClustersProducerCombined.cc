@@ -45,8 +45,9 @@ ShallowTrackClustersProducerCombined::ShallowTrackClustersProducerCombined(const
      Suffix       ( iConfig.getParameter<std::string>("Suffix")    ),
      Prefix       ( iConfig.getParameter<std::string>("Prefix") ),
      //lorentzAngleName(iConfig.getParameter<std::string>("LorentzAngle")),
-     edmstripdigisimlink_Token_( consumes<edm::DetSetVector<StripDigiSimLink>>( iConfig.getParameter<edm::InputTag>("StripDigiSimLinkTag"))),
-     isData       ( iConfig.getParameter<bool>("isData") )
+     isData       ( iConfig.getParameter<bool>("isData")),
+     edmstripdigisimlink_Token_( consumes<edm::DetSetVector<StripDigiSimLink>>( iConfig.getParameter<edm::InputTag>("StripDigiSimLinkTag")))
+
      //lowBound       ( iConfig.getParameter<int32_t>("lowBound") ),
      //highBound       ( iConfig.getParameter<int32_t>("highBound") ),
      //filename       ( iConfig.getParameter<std::string>("filename") )
@@ -161,8 +162,8 @@ ShallowTrackClustersProducerCombined::ShallowTrackClustersProducerCombined(const
   produces <std::vector<unsigned int> > ( "bx" );
 
   //  produces <std::vector<unsigned int> > ( "channel"       );
-  //   produces <std::vector<float> > ( "fraction"       );
-  //  produces <std::vector<int> > ( "bunchcrossing"       );
+  produces <std::vector<std::vector<float> > > ( "fraction"       );
+  // produces <std::vector<int> > ( "bunchcrossing"       );
 
 
   //
@@ -287,8 +288,8 @@ produce(edm::Event& iEvent, const edm::EventSetup& iSetup) {
   auto       PU      = std::make_unique<std::vector<float>>();
   auto       bx      = std::make_unique<std::vector<unsigned int>>();
 
-  // auto       channel      = std::make_unique<std::vector<unsigned int>>();
-  //auto       fraction     = std::make_unique<std::vector<float>>();
+  //auto       channel      = std::make_unique<std::vector<unsigned int>>();
+  auto       fraction     = std::make_unique<std::vector<std::vector<float> > >();
   //auto       bunchcrossing      = std::make_unique<std::vector<int>>();
 
   edm::ESHandle<TrackerGeometry> theTrackerGeometry;         iSetup.get<TrackerDigiGeometryRecord>().get( theTrackerGeometry );  
@@ -308,12 +309,14 @@ produce(edm::Event& iEvent, const edm::EventSetup& iSetup) {
   iSetup.get<TrackerTopologyRcd>().get(tTopoHandle);
   const TrackerTopology* const tTopo = tTopoHandle.product();
 
-
+  edm::Handle< edm::DetSetVector<StripDigiSimLink> > stripdigilinkContainer;
+  iEvent.getByToken( edmstripdigisimlink_Token_, stripdigilinkContainer);
+  edm::Handle<edmNew::DetSetVector<SiStripCluster>> clustercoll;                                                                            
+  iEvent.getByToken(clusters_token_,clustercoll); 
   TrajectoryStateCombiner combiner;
 
   size_t ontrk_cluster_idx=0;
   std::map<size_t, std::vector<size_t> > mapping; //cluster idx --> on trk cluster idx (multiple)
-
 
   //myfile2.open(filename);
   float PU_=0;
@@ -416,9 +419,6 @@ produce(edm::Event& iEvent, const edm::EventSetup& iSetup) {
 	outsideasymm->push_back( digis.outsideasymm() );
 	neweta->push_back(       (digis.last-digis.first)/info.charge() );
 	newetaerr->push_back(    (sqrt(digis.last+digis.first))/pow(info.charge(),1.5) );
-
-
-
 	detid->push_back(            id                 );
 	subdetid->push_back(         moduleV.subdetid      );
 	side->push_back(             moduleV.side          );
@@ -427,12 +427,64 @@ produce(edm::Event& iEvent, const edm::EventSetup& iSetup) {
 	stringringrod->push_back(    moduleV.stringringrod );
 	petal->push_back(            moduleV.petal         );
 	stereo->push_back(           moduleV.stereo        );
-
-
 	stripLength->push_back(           theStripDet->specificTopology().stripLength() );
 	sensorThickness->push_back(             theStripDet->specificSurface().bounds().thickness() );
 
+	std::vector<int> map_subdets_cluster_charge_IT;
+	std::vector<int> map_subdets_cluster_width_IT;
+	std::vector<int> map_subdets_cluster_charge_OOT;
+	std::vector<int> map_subdets_cluster_width_OOT;
+	std::vector<float> fraction_;
 
+	//for(auto det = cluster_ptr->begin();det != cluster_ptr->end(); ++det) {
+	//DetId detid(det->detId());
+	//edm::DetSetVector<StripDigiSimLink>::const_iterator idigilinksearch = stripdigilinkContainer->find(id); 
+	  //if(idigilinksearch != stripdigilinkContainer->end()) {  //if it is not empty
+	    //edm::DetSet<StripDigiSimLink> stripdigilink_detset = (*idigilinksearch);
+	    // std::vector<float> fraction_s;    
+	      //    for(edmNew::DetSet<SiStripCluster>::const_iterator clus=moduleV.begin();clus!=moduleV.end();++clus) {
+	for(edmNew::DetSetVector<SiStripCluster>::const_iterator det = clustercoll->begin();det != clustercoll->end(); ++det) {
+
+	DetId detid(det->detId());
+	edm::DetSetVector<StripDigiSimLink>::const_iterator idigilinksearch = stripdigilinkContainer->find(detid); 
+	if(idigilinksearch != stripdigilinkContainer->end()) {  //if it is not empty
+	  edm::DetSet<StripDigiSimLink> stripdigilink_detset = (*idigilinksearch);
+	  std::vector<float> fraction_s;    
+		  for(edmNew::DetSet<SiStripCluster>::const_iterator clus=det->begin();clus!=det->end();++clus) {
+		    
+		    int clus_size = clus->amplitudes().size();
+		    int clus_firststrip  = clus->firstStrip();     
+		    int clus_laststrip   = clus_firststrip + clus_size;
+		    
+	      for(edm::DetSet<StripDigiSimLink>::const_iterator simlinkiter = stripdigilink_detset.data.begin(), 
+		    simlinkerEnd = stripdigilink_detset.data.end(); simlinkiter != simlinkerEnd; ++simlinkiter){      
+		int channel_ = (int)(simlinkiter->channel()); 
+		//channel->push_back(channel_);
+		fraction_s.push_back(simlinkiter->fraction());
+		unsigned int clus_bunchcrossing;
+		if( channel_ >= clus_firststrip  && channel_ < clus_laststrip ){
+		  clus_bunchcrossing=simlinkiter->eventId().bunchCrossing();
+
+		}else{
+		  clus_bunchcrossing = -1;
+		}
+
+		//bunchcrossing->push_back(clus_bunchcrossing); 
+		if(clus_bunchcrossing==0){
+		  map_subdets_cluster_charge_IT.push_back(clus->charge());
+		  map_subdets_cluster_width_IT.push_back(clus->amplitudes().size());
+		}else{
+		  map_subdets_cluster_charge_OOT.push_back(clus->charge()); 
+		  map_subdets_cluster_width_OOT.push_back(clus->amplitudes().size()); 
+		}
+	    
+
+	      }//Loop over clusters in each sub-setector
+	    }//Loop over edmstripsimdigilink detsetvector
+	    fraction->push_back(fraction_s);
+	  }//Loop over cluster collection over all SiStrip Clusters
+	  	} //end digisimlink
+   
 	uint32_t strips=0;
 	for( auto itAmpl = cluster_ptr->amplitudes().begin(); itAmpl != cluster_ptr->amplitudes().end(); ++itAmpl){
           stripCharge->push_back(*itAmpl);//@MJ@ 
@@ -506,61 +558,6 @@ produce(edm::Event& iEvent, const edm::EventSetup& iSetup) {
 
     onTrkClustersBegin->at(trk_idx) = trk_strt_idx;
     onTrkClustersEnd->at(trk_idx)   = ontrk_cluster_idx;
-
-    /*
-  //inserted digisimlink
-    edm::Handle<edmNew::DetSetVector<SiStripCluster>> clustercoll;
-    iEvent.getByToken(clusters_token_,clustercoll);
-
-    edm::Handle< edm::DetSetVector<StripDigiSimLink> > stripdigilinkContainer;
-    iEvent.getByToken( edmstripdigisimlink_Token_, stripdigilinkContainer);
-
-    std::vector<int> map_subdets_cluster_charge_IT;
-    std::vector<int> map_subdets_cluster_width_IT;
-    std::vector<int> map_subdets_cluster_charge_OOT;
-    std::vector<int> map_subdets_cluster_width_OOT;
-
-    for(edmNew::DetSetVector<SiStripCluster>::const_iterator det = clustercoll->begin();det != clustercoll->end(); ++det) {
-
-      DetId detid(det->detId());
-      unsigned int subdet = detid.subdetId();
-
-      edm::DetSetVector<StripDigiSimLink>::const_iterator idigilinksearch = stripdigilinkContainer->find(detid); 
-      if(idigilinksearch != stripdigilinkContainer->end()) {  //if it is not empty
-	edm::DetSet<StripDigiSimLink> stripdigilink_detset = (*idigilinksearch);
-    
-	for(edmNew::DetSet<SiStripCluster>::const_iterator clus=det->begin();clus!=det->end();++clus) {
-	  int clus_size = clus->amplitudes().size();
-	  int clus_firststrip  = clus->firstStrip();     
-	  int clus_laststrip   = clus_firststrip + clus_size;
-		  
-	  for(edm::DetSet<StripDigiSimLink>::const_iterator simlinkiter = stripdigilink_detset.data.begin(), 
-		simlinkerEnd = stripdigilink_detset.data.end(); simlinkiter != simlinkerEnd; ++simlinkiter){      
-	    int channel_ = (int)(simlinkiter->channel()); 
-
-	    //	    channel->push_back(channel_);
-	    fraction->push_back(simlinkiter->fraction());
-	    unsigned int clus_bunchcrossing;
-	    if( channel_ >= clus_firststrip  && channel_ < clus_laststrip ){
-	      clus_bunchcrossing=simlinkiter->eventId().bunchCrossing();
-
-	    }else{
-	      clus_bunchcrossing = -1;
-	    }
-
-	      bunchcrossing->push_back(clus_bunchcrossing);	 
-	    if(clus_bunchcrossing==0){
-	      map_subdets_cluster_charge_IT.push_back(clus->charge());
-	      map_subdets_cluster_width_IT.push_back(clus->amplitudes().size());
-	    }else{
-	      map_subdets_cluster_charge_OOT.push_back(clus->charge()); 
-	      map_subdets_cluster_width_OOT.push_back(clus->amplitudes().size()); 
-	    }
-	  }//Loop over clusters in each sub-setector
-	}//Loop over edmstripsimdigilink detsetvector
-      }//Loop over cluster collection over all SiStrip Clusters
-    } //end digisimlink
-    */
 
   } //for(TrajTrackAssociationCollection::const_iterator association = associations->begin();
 
@@ -671,7 +668,7 @@ produce(edm::Event& iEvent, const edm::EventSetup& iSetup) {
   iEvent.put(std::move(PU),       "PU"        );
   iEvent.put(std::move(bx),       "bx"        );
   //  iEvent.put(std::move(channel),       "channel"        );
-  //  iEvent.put(std::move(fraction),       "fraction"        );
+   iEvent.put(std::move(fraction),       "fraction"        );
   // iEvent.put(std::move(bunchcrossing),       "bunchcrossing"        );
 
   
